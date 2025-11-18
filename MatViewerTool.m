@@ -4949,8 +4949,22 @@ classdef MatViewerTool < matlab.apps.AppBase
 
                         save(outputFile, '-struct', 'saveData');
 
+                        % 根据预处理类型保存到对应的列
+                        cacheColumn = 4;  % 默认为自定义列
+                        if strcmp(prepConfig.type, 'CFAR')
+                            cacheColumn = 2;
+                        elseif strcmp(prepConfig.type, '非相参积累')
+                            cacheColumn = 3;
+                        elseif strcmp(prepConfig.type, '相参积累')
+                            cacheColumn = 5;
+                        elseif strcmp(prepConfig.type, '检测')
+                            cacheColumn = 6;
+                        elseif strcmp(prepConfig.type, '识别')
+                            cacheColumn = 7;
+                        end
+
                         % 保存到内存缓存
-                        app.PreprocessingResults{frameIdx, prepIndex + 1} = processedData;
+                        app.PreprocessingResults{frameIdx, cacheColumn} = processedData;
                         
                     catch ME
                         fprintf('警告：第 %d 帧处理失败 - %s\n', frameIdx, ME.message);
@@ -5225,9 +5239,22 @@ classdef MatViewerTool < matlab.apps.AppBase
                     app.PreprocessingResults = cell(length(app.MatData), 7);
                 end
 
-                % 自定义预处理始终保存到第4列
-                app.PreprocessingResults{app.CurrentIndex, 4} = processedData;
-                
+                % 根据预处理类型保存到对应的列
+                cacheColumn = 4;  % 默认为自定义列
+                if strcmp(prepConfig.type, 'CFAR')
+                    cacheColumn = 2;
+                elseif strcmp(prepConfig.type, '非相参积累')
+                    cacheColumn = 3;
+                elseif strcmp(prepConfig.type, '相参积累')
+                    cacheColumn = 5;
+                elseif strcmp(prepConfig.type, '检测')
+                    cacheColumn = 6;
+                elseif strcmp(prepConfig.type, '识别')
+                    cacheColumn = 7;
+                end
+
+                app.PreprocessingResults{app.CurrentIndex, cacheColumn} = processedData;
+
                 success = true;
                 
             catch ME
@@ -6529,6 +6556,9 @@ classdef MatViewerTool < matlab.apps.AppBase
                     return;
                 end
 
+                % 保存原始矩阵（用于后续可能的预处理）
+                rawMatrix = inputMatrix;
+
                 % 创建输出目录
                 [dataPath, ~, ~] = fileparts(app.MatFiles{app.CurrentIndex});
                 outputDir = fullfile(dataPath, prepConfig.name);
@@ -6604,6 +6634,7 @@ classdef MatViewerTool < matlab.apps.AppBase
                 % 准备保存数据：包含绘图变量、帧信息和额外输出
                 saveData = struct();
                 saveData.complex_matrix = processedMatrix;
+                saveData.raw_matrix = rawMatrix;  % 保存预处理前的原始矩阵
                 if isfield(currentData, 'frame_info')
                     saveData.frame_info = currentData.frame_info;
                 end
