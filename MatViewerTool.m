@@ -4481,7 +4481,7 @@ classdef MatViewerTool < matlab.apps.AppBase
                     
                     % 尝试查找complex_matrix字段（支持直接字段和嵌套在结构体中的情况）
                     inputMatrix = [];
-                    
+
                     % 首先检查直接字段
                     if isfield(currentData, 'complex_matrix')
                         inputMatrix = currentData.complex_matrix;
@@ -4497,10 +4497,13 @@ classdef MatViewerTool < matlab.apps.AppBase
                             end
                         end
                     end
-                    
+
                     if isempty(inputMatrix)
                         continue;
                     end
+
+                    % 保存原始矩阵（用于后续可能的预处理）
+                    rawMatrix = inputMatrix;
                     
                     % 创建输出目录（在调用脚本之前）
                     [dataPath, ~, ~] = fileparts(app.MatFiles{frameIdx});
@@ -4596,10 +4599,11 @@ classdef MatViewerTool < matlab.apps.AppBase
 
                         % 保存到本地（只保存必要字段）
                         outputFile = fullfile(outputDir, sprintf('%s_processed.mat', originalName));
-                        
+
                         % 准备保存数据：包含绘图变量、帧信息和额外输出
                         saveData = struct();
                         saveData.complex_matrix = processedMatrix;
+                        saveData.raw_matrix = rawMatrix;  % 保存预处理前的原始矩阵
                         if isfield(currentData, 'frame_info')
                             saveData.frame_info = currentData.frame_info;
                         end
@@ -4607,7 +4611,7 @@ classdef MatViewerTool < matlab.apps.AppBase
                         if ~isempty(fieldnames(additionalOutputs))
                             saveData.additional_outputs = additionalOutputs;
                         end
-                        
+
                         save(outputFile, '-struct', 'saveData');
 
                         % 保存到内存缓存
@@ -4687,7 +4691,7 @@ classdef MatViewerTool < matlab.apps.AppBase
                 
                 % 尝试查找complex_matrix字段（支持直接字段和嵌套在结构体中的情况）
                 inputMatrix = [];
-                
+
                 % 首先检查直接字段
                 if isfield(currentData, 'complex_matrix')
                     inputMatrix = currentData.complex_matrix;
@@ -4703,11 +4707,14 @@ classdef MatViewerTool < matlab.apps.AppBase
                         end
                     end
                 end
-                
+
                 if isempty(inputMatrix)
                     uialert(app.UIFigure, '当前数据不包含complex_matrix字段！', '错误', 'Icon', 'error');
                     return;
                 end
+
+                % 保存原始矩阵（用于后续可能的预处理）
+                rawMatrix = inputMatrix;
                 
                 % 创建输出目录
                 [dataPath, ~, ~] = fileparts(app.MatFiles{app.CurrentIndex});
@@ -4810,6 +4817,7 @@ classdef MatViewerTool < matlab.apps.AppBase
                 % 准备保存数据：包含绘图变量、帧信息和额外输出
                 saveData = struct();
                 saveData.complex_matrix = processedMatrix;
+                saveData.raw_matrix = rawMatrix;  % 保存预处理前的原始矩阵
                 if isfield(currentData, 'frame_info')
                     saveData.frame_info = currentData.frame_info;
                 end
