@@ -3212,6 +3212,9 @@ classdef MatViewerTool < matlab.apps.AppBase
             dlg = uifigure('Name', '添加预处理', 'Position', [200 100 750 680], 'Visible', 'off');
             dlg.WindowStyle = 'modal';
 
+            % 设置关闭请求回调函数，确保关闭后主UI置顶
+            dlg.CloseRequestFcn = @(~,~) closeDlgAndFocusMain();
+
             % 居中显示弹窗
             movegui(dlg, 'center');
 
@@ -3221,6 +3224,12 @@ classdef MatViewerTool < matlab.apps.AppBase
             % 置顶弹窗
             figure(app.UIFigure);  % 先置顶主UI
             figure(dlg);           % 再置顶预处理弹窗
+
+            % 关闭对话框并置顶主UI的函数
+            function closeDlgAndFocusMain()
+                delete(dlg);
+                figure(app.UIFigure);  % 置顶主UI
+            end
 
             % 添加帮助按钮到对话框右上角
             helpBtn = uibutton(dlg, 'push');
@@ -3509,7 +3518,7 @@ classdef MatViewerTool < matlab.apps.AppBase
             cancelBtn.Layout.Row = 1;
             cancelBtn.Layout.Column = 3;
             cancelBtn.FontSize = 13;
-            cancelBtn.ButtonPushedFcn = @(~,~) close(dlg);
+            cancelBtn.ButtonPushedFcn = @(~,~) closeDlgAndFocusMain();
             
             % ========== 回调函数 ==========
             
@@ -4443,17 +4452,13 @@ classdef MatViewerTool < matlab.apps.AppBase
 
                 if success
                     updateMultiView(app);
-                    close(dlg);
+                    closeDlgAndFocusMain();
 
                     if length(frameIndices) > 1
                         uialert(app.UIFigure, sprintf('预处理 "%s" 已应用到 %d 帧数据！', prepName, length(frameIndices)), '成功', 'Icon', 'success');
                     else
                         uialert(app.UIFigure, sprintf('预处理 "%s" 已添加成功！', prepName), '成功', 'Icon', 'success');
                     end
-
-                    % 将GUI窗口置顶
-                    figure(app.UIFigure);
-                    drawnow;
                 else
                     app.PreprocessingList(end) = [];
                     updatePreprocessingControls(app);
@@ -4843,6 +4848,8 @@ classdef MatViewerTool < matlab.apps.AppBase
 
                     % 执行预处理
                     try
+                        additionalOutputs = struct();  % 初始化额外输出变量
+
                         if strcmp(prepConfig.scriptPath, 'default')
                             % 使用默认处理
                             processedMatrix = inputMatrix;
@@ -5106,6 +5113,8 @@ classdef MatViewerTool < matlab.apps.AppBase
                 [~, originalName, ~] = fileparts(app.MatFiles{app.CurrentIndex});
 
                 % 执行预处理
+                additionalOutputs = struct();  % 初始化额外输出变量
+
                 if strcmp(prepConfig.scriptPath, 'default')
                     % 使用默认处理（暂时返回原数据）
                     processedMatrix = inputMatrix;
