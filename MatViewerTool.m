@@ -6719,16 +6719,71 @@ classdef MatViewerTool < matlab.apps.AppBase
                 return;
             end
 
-            [selection, ok] = listdlg(...
-                'PromptString', {'当前已有4个视图，无法添加更多。', '请选择要关闭的视图：'}, ...
-                'SelectionMode', 'single', ...
-                'ListString', viewOptions, ...
-                'ListSize', [300, 150], ...
-                'Name', '关闭视图');
+            % 创建自定义对话框（替代listdlg，支持居中和置顶）
+            dlg = uifigure('Name', '关闭视图', 'Position', [100 100 350 250], 'Visible', 'off');
+            dlg.WindowStyle = 'modal';
 
-            if ok && ~isempty(selection)
+            % 存储选择结果的变量
+            selectedIndex = [];
+            userClickedOK = false;
+
+            % 设置关闭请求回调函数，确保关闭后主UI置顶
+            dlg.CloseRequestFcn = @(~,~) closeDlgAndFocusMain();
+
+            % 居中显示弹窗
+            movegui(dlg, 'center');
+
+            % 创建布局
+            mainLayout = uigridlayout(dlg, [3, 1]);
+            mainLayout.RowHeight = {60, '1x', 50};
+            mainLayout.Padding = [15 15 15 15];
+
+            % 提示文本
+            promptLabel = uilabel(mainLayout);
+            promptLabel.Layout.Row = 1;
+            promptLabel.Text = sprintf('当前已有4个视图，无法添加更多。\n请选择要关闭的视图：');
+            promptLabel.WordWrap = 'on';
+            promptLabel.FontSize = 12;
+            promptLabel.VerticalAlignment = 'top';
+
+            % 列表框
+            listBox = uilistbox(mainLayout);
+            listBox.Layout.Row = 2;
+            listBox.Items = viewOptions;
+            listBox.FontSize = 11;
+            if ~isempty(viewOptions)
+                listBox.Value = viewOptions{1};
+            end
+
+            % 按钮布局
+            btnLayout = uigridlayout(mainLayout, [1, 3]);
+            btnLayout.Layout.Row = 3;
+            btnLayout.ColumnWidth = {'1x', 80, 80};
+            btnLayout.Padding = [0 0 0 0];
+
+            % 占位
+            uilabel(btnLayout);
+
+            % 确定按钮
+            okBtn = uibutton(btnLayout, 'push');
+            okBtn.Text = '确定';
+            okBtn.ButtonPushedFcn = @(~,~) confirmSelection();
+
+            % 取消按钮
+            cancelBtn = uibutton(btnLayout, 'push');
+            cancelBtn.Text = '取消';
+            cancelBtn.ButtonPushedFcn = @(~,~) closeDlgAndFocusMain();
+
+            % 显示对话框
+            dlg.Visible = 'on';
+
+            % 等待对话框关闭
+            uiwait(dlg);
+
+            % 处理结果
+            if userClickedOK && ~isempty(selectedIndex)
                 % 关闭选中的视图
-                columnToClose = viewColumns(selection);
+                columnToClose = viewColumns(selectedIndex);
                 if columnToClose == 0
                     % 关闭原图
                     app.ShowOriginalCheck.Value = false;
@@ -6740,6 +6795,25 @@ classdef MatViewerTool < matlab.apps.AppBase
                 % 更新显示
                 updateMultiView(app);
                 success = true;
+            end
+
+            % 确保主UI置顶
+            figure(app.UIFigure);
+
+            % 嵌套函数
+            function confirmSelection()
+                % 获取选择的索引
+                selectedValue = listBox.Value;
+                selectedIndex = find(strcmp(viewOptions, selectedValue), 1);
+                userClickedOK = true;
+                closeDlgAndFocusMain();
+            end
+
+            function closeDlgAndFocusMain()
+                if isvalid(dlg)
+                    delete(dlg);
+                end
+                figure(app.UIFigure);  % 置顶主UI
             end
         end
 
