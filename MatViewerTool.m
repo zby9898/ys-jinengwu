@@ -3542,13 +3542,32 @@ classdef MatViewerTool < matlab.apps.AppBase
                             processedItems{end+1} = '非相参积累';
                         end
                     end
-                    % 检查其他列
+                    % 检查相参积累列（第5列）
+                    if size(app.PreprocessingResults, 2) >= 5 && ~isempty(app.PreprocessingResults{app.CurrentIndex, 5})
+                        if ~any(strcmp(processedItems, '相参积累'))
+                            processedItems{end+1} = '相参积累';
+                        end
+                    end
+                    % 检查检测列（第6列）
+                    if size(app.PreprocessingResults, 2) >= 6 && ~isempty(app.PreprocessingResults{app.CurrentIndex, 6})
+                        if ~any(strcmp(processedItems, '检测'))
+                            processedItems{end+1} = '检测';
+                        end
+                    end
+                    % 检查识别列（第7列）
+                    if size(app.PreprocessingResults, 2) >= 7 && ~isempty(app.PreprocessingResults{app.CurrentIndex, 7})
+                        if ~any(strcmp(processedItems, '识别'))
+                            processedItems{end+1} = '识别';
+                        end
+                    end
+                    % 检查自定义预处理列（第4列及之后）
                     if size(app.PreprocessingResults, 2) >= 4
                         for col = 4:size(app.PreprocessingResults, 2)
                             if ~isempty(app.PreprocessingResults{app.CurrentIndex, col})
                                 result = app.PreprocessingResults{app.CurrentIndex, col};
-                                if isfield(result, 'name')
-                                    prepName = result.name;
+                                % 从preprocessing_info中获取名称
+                                if isfield(result, 'preprocessing_info') && isfield(result.preprocessing_info, 'name')
+                                    prepName = result.preprocessing_info.name;
                                     if ~any(strcmp(processedItems, prepName))
                                         processedItems{end+1} = prepName;
                                     end
@@ -3672,8 +3691,11 @@ classdef MatViewerTool < matlab.apps.AppBase
                     end
                 end
 
-                % 如果没有找到预处理数据，返回
+                % 如果没有找到预处理数据，给出提示
                 if isempty(prepData)
+                    uialert(dlg, sprintf('当前帧未找到预处理结果"%s"，请确认上一步是否进行处理！', selectedObj), '提示', 'Icon', 'warning');
+                    % 清空参数表格
+                    paramTable.Data = cell(0, 5);
                     return;
                 end
 
@@ -4730,31 +4752,85 @@ classdef MatViewerTool < matlab.apps.AppBase
                     
                     % 获取当前帧数据
                     currentData = app.MatData{frameIdx};
-                    
-                    % 尝试查找complex_matrix字段（支持直接字段和嵌套在结构体中的情况）
-                    inputMatrix = [];
 
-                    % 首先检查直接字段
-                    if isfield(currentData, 'complex_matrix')
-                        inputMatrix = currentData.complex_matrix;
-                    else
-                        % 如果没有直接字段，查找是否有包含complex_matrix的结构体
-                        dataFields = fieldnames(currentData);
-                        for i = 1:length(dataFields)
-                            fieldName = dataFields{i};
-                            fieldValue = currentData.(fieldName);
-                            if isstruct(fieldValue) && isfield(fieldValue, 'complex_matrix')
-                                inputMatrix = fieldValue.complex_matrix;
-                                break;
+                    % 根据处理对象获取输入矩阵
+                    inputMatrix = [];
+                    processingObject = prepConfig.processing_object;
+
+                    if strcmp(processingObject, '当前帧原图')
+                        % 从原始数据获取complex_matrix
+                        % 首先检查直接字段
+                        if isfield(currentData, 'complex_matrix')
+                            inputMatrix = currentData.complex_matrix;
+                        else
+                            % 如果没有直接字段，查找是否有包含complex_matrix的结构体
+                            dataFields = fieldnames(currentData);
+                            for i = 1:length(dataFields)
+                                fieldName = dataFields{i};
+                                fieldValue = currentData.(fieldName);
+                                if isstruct(fieldValue) && isfield(fieldValue, 'complex_matrix')
+                                    inputMatrix = fieldValue.complex_matrix;
+                                    break;
+                                end
                             end
+                        end
+
+                        if isempty(inputMatrix)
+                            fprintf('警告：第 %d 帧不包含complex_matrix字段，跳过处理\n', frameIdx);
+                            continue;
+                        end
+                    else
+                        % 从预处理结果获取complex_matrix
+                        if isempty(app.PreprocessingResults) || frameIdx > size(app.PreprocessingResults, 1)
+                            fprintf('警告：第 %d 帧未找到预处理结果"%s"，跳过处理\n', frameIdx, processingObject);
+                            continue;
+                        end
+
+                        % 查找对应的预处理结果
+                        prepData = [];
+                        if strcmp(processingObject, 'CFAR')
+                            prepData = app.PreprocessingResults{frameIdx, 2};
+                        elseif strcmp(processingObject, '非相参积累')
+                            prepData = app.PreprocessingResults{frameIdx, 3};
+                        elseif strcmp(processingObject, '相参积累')
+                            prepData = app.PreprocessingResults{frameIdx, 5};
+                        elseif strcmp(processingObject, '检测')
+                            prepData = app.PreprocessingResults{frameIdx, 6};
+                        elseif strcmp(processingObject, '识别')
+                            prepData = app.PreprocessingResults{frameIdx, 7};
+                        else
+                            % 在自定义预处理列（第4列及之后）中查找
+                            for col = 4:size(app.PreprocessingResults, 2)
+                                if ~isempty(app.PreprocessingResults{frameIdx, col})
+                                    result = app.PreprocessingResults{frameIdx, col};
+                                    if isfield(result, 'preprocessing_info') && ...
+                                       isfield(result.preprocessing_info, 'name') && ...
+                                       strcmp(result.preprocessing_info.name, processingObject)
+                                        prepData = result;
+                                        break;
+                                    end
+                                end
+                            end
+                        end
+
+                        if isempty(prepData)
+                            fprintf('警告：第 %d 帧未找到预处理结果"%s"，跳过处理\n', frameIdx, processingObject);
+                            continue;
+                        end
+
+                        % 从预处理结果获取complex_matrix（而非raw_matrix）
+                        % 注意：预处理始终使用complex_matrix作为输入
+                        % raw_matrix是保存的预处理前原始数据，需要时可在脚本中手动使用
+                        if isfield(prepData, 'complex_matrix')
+                            inputMatrix = prepData.complex_matrix;
+                        else
+                            fprintf('警告：第 %d 帧的预处理结果"%s"不包含complex_matrix字段，跳过处理\n', frameIdx, processingObject);
+                            continue;
                         end
                     end
 
-                    if isempty(inputMatrix)
-                        continue;
-                    end
-
                     % 保存原始矩阵（用于后续可能的预处理）
+                    % 这将保存为raw_matrix到输出文件，供需要时使用
                     rawMatrix = inputMatrix;
                     
                     % 创建输出目录（在调用脚本之前）
@@ -4940,32 +5016,85 @@ classdef MatViewerTool < matlab.apps.AppBase
             try
                 % 获取当前帧数据
                 currentData = app.MatData{app.CurrentIndex};
-                
-                % 尝试查找complex_matrix字段（支持直接字段和嵌套在结构体中的情况）
-                inputMatrix = [];
 
-                % 首先检查直接字段
-                if isfield(currentData, 'complex_matrix')
-                    inputMatrix = currentData.complex_matrix;
-                else
-                    % 如果没有直接字段，查找是否有包含complex_matrix的结构体
-                    dataFields = fieldnames(currentData);
-                    for i = 1:length(dataFields)
-                        fieldName = dataFields{i};
-                        fieldValue = currentData.(fieldName);
-                        if isstruct(fieldValue) && isfield(fieldValue, 'complex_matrix')
-                            inputMatrix = fieldValue.complex_matrix;
-                            break;
+                % 根据处理对象获取输入矩阵
+                inputMatrix = [];
+                processingObject = prepConfig.processing_object;
+
+                if strcmp(processingObject, '当前帧原图')
+                    % 从原始数据获取complex_matrix
+                    % 首先检查直接字段
+                    if isfield(currentData, 'complex_matrix')
+                        inputMatrix = currentData.complex_matrix;
+                    else
+                        % 如果没有直接字段，查找是否有包含complex_matrix的结构体
+                        dataFields = fieldnames(currentData);
+                        for i = 1:length(dataFields)
+                            fieldName = dataFields{i};
+                            fieldValue = currentData.(fieldName);
+                            if isstruct(fieldValue) && isfield(fieldValue, 'complex_matrix')
+                                inputMatrix = fieldValue.complex_matrix;
+                                break;
+                            end
                         end
+                    end
+
+                    if isempty(inputMatrix)
+                        uialert(app.UIFigure, '当前数据不包含complex_matrix字段！', '错误', 'Icon', 'error');
+                        return;
+                    end
+                else
+                    % 从预处理结果获取complex_matrix
+                    if isempty(app.PreprocessingResults) || app.CurrentIndex > size(app.PreprocessingResults, 1)
+                        uialert(app.UIFigure, sprintf('当前帧未找到预处理结果"%s"，请确认上一步是否进行处理！', processingObject), '错误', 'Icon', 'error');
+                        return;
+                    end
+
+                    % 查找对应的预处理结果
+                    prepData = [];
+                    if strcmp(processingObject, 'CFAR')
+                        prepData = app.PreprocessingResults{app.CurrentIndex, 2};
+                    elseif strcmp(processingObject, '非相参积累')
+                        prepData = app.PreprocessingResults{app.CurrentIndex, 3};
+                    elseif strcmp(processingObject, '相参积累')
+                        prepData = app.PreprocessingResults{app.CurrentIndex, 5};
+                    elseif strcmp(processingObject, '检测')
+                        prepData = app.PreprocessingResults{app.CurrentIndex, 6};
+                    elseif strcmp(processingObject, '识别')
+                        prepData = app.PreprocessingResults{app.CurrentIndex, 7};
+                    else
+                        % 在自定义预处理列（第4列及之后）中查找
+                        for col = 4:size(app.PreprocessingResults, 2)
+                            if ~isempty(app.PreprocessingResults{app.CurrentIndex, col})
+                                result = app.PreprocessingResults{app.CurrentIndex, col};
+                                if isfield(result, 'preprocessing_info') && ...
+                                   isfield(result.preprocessing_info, 'name') && ...
+                                   strcmp(result.preprocessing_info.name, processingObject)
+                                    prepData = result;
+                                    break;
+                                end
+                            end
+                        end
+                    end
+
+                    if isempty(prepData)
+                        uialert(app.UIFigure, sprintf('当前帧未找到预处理结果"%s"，请确认上一步是否进行处理！', processingObject), '错误', 'Icon', 'error');
+                        return;
+                    end
+
+                    % 从预处理结果获取complex_matrix（而非raw_matrix）
+                    % 注意：预处理始终使用complex_matrix作为输入
+                    % raw_matrix是保存的预处理前原始数据，需要时可在脚本中手动使用
+                    if isfield(prepData, 'complex_matrix')
+                        inputMatrix = prepData.complex_matrix;
+                    else
+                        uialert(app.UIFigure, sprintf('预处理结果"%s"不包含complex_matrix字段！', processingObject), '错误', 'Icon', 'error');
+                        return;
                     end
                 end
 
-                if isempty(inputMatrix)
-                    uialert(app.UIFigure, '当前数据不包含complex_matrix字段！', '错误', 'Icon', 'error');
-                    return;
-                end
-
                 % 保存原始矩阵（用于后续可能的预处理）
+                % 这将保存为raw_matrix到输出文件，供需要时使用
                 rawMatrix = inputMatrix;
                 
                 % 创建输出目录
