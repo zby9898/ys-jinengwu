@@ -3435,11 +3435,11 @@ classdef MatViewerTool < matlab.apps.AppBase
             paramTable = uitable(paramLayout);
             paramTable.Layout.Row = 2;
             paramTable.Layout.Column = 1;
-            paramTable.ColumnName = {'参数名称', '参数值', '数据类型', '操作'};
-            paramTable.ColumnWidth = {150, 200, 100, 80};  % 改用数字
+            paramTable.ColumnName = {'展开', '参数名称', '参数值', '数据类型', '操作'};
+            paramTable.ColumnWidth = {50, 150, 200, 100, 80};  % 改用数字
             paramTable.RowName = {};
-            paramTable.Data = cell(0, 4);
-            paramTable.ColumnEditable = [true true true false];
+            paramTable.Data = cell(0, 5);
+            paramTable.ColumnEditable = [false true true true false];
             paramTable.CellSelectionCallback = @handleTableClick;  % 不使用 createCallbackFcn
             paramTable.CellEditCallback = @checkFrameInfoField;
             
@@ -3592,6 +3592,9 @@ classdef MatViewerTool < matlab.apps.AppBase
 
                 % 根据处理对象更新预处理类型下拉框
                 updatePrepTypeByObject();
+
+                % 如果选择的是预处理结果，加载其输出变量到参数表格
+                loadPreprocessingOutputs();
             end
 
             function updatePrepTypeByObject()
@@ -3627,7 +3630,131 @@ classdef MatViewerTool < matlab.apps.AppBase
                     prepTypeDropdown.Value = currentType;
                 end
             end
-            
+
+            % 用于存储当前输出变量的实际数据（支持展开/折叠）
+            currentOutputVars = struct();
+
+            function loadPreprocessingOutputs()
+                % 当选择预处理对象时，加载其输出变量到参数表格
+                selectedObj = objDropdown.Value;
+
+                % 如果选择的是"-- 请选择 --"或"当前帧原图"，清空参数表格
+                if strcmp(selectedObj, '-- 请选择 --') || strcmp(selectedObj, '当前帧原图')
+                    return;
+                end
+
+                % 检查是否有预处理结果数据
+                if isempty(app.PreprocessingResults) || app.CurrentIndex > size(app.PreprocessingResults, 1)
+                    return;
+                end
+
+                % 查找对应的预处理结果
+                prepData = [];
+
+                % 检查是否是CFAR
+                if strcmp(selectedObj, 'CFAR') && ~isempty(app.PreprocessingResults{app.CurrentIndex, 2})
+                    prepData = app.PreprocessingResults{app.CurrentIndex, 2};
+                % 检查是否是非相参积累
+                elseif strcmp(selectedObj, '非相参积累') && ~isempty(app.PreprocessingResults{app.CurrentIndex, 3})
+                    prepData = app.PreprocessingResults{app.CurrentIndex, 3};
+                % 检查其他自定义预处理
+                else
+                    for col = 4:size(app.PreprocessingResults, 2)
+                        if ~isempty(app.PreprocessingResults{app.CurrentIndex, col})
+                            result = app.PreprocessingResults{app.CurrentIndex, col};
+                            if isfield(result, 'preprocessing_info') && ...
+                               isfield(result.preprocessing_info, 'name') && ...
+                               strcmp(result.preprocessing_info.name, selectedObj)
+                                prepData = result;
+                                break;
+                            end
+                        end
+                    end
+                end
+
+                % 如果没有找到预处理数据，返回
+                if isempty(prepData)
+                    return;
+                end
+
+                % 清空当前参数表格
+                paramTable.Data = cell(0, 5);
+
+                % 提取所有输出变量
+                outputVars = struct();
+                currentOutputVars = struct();  % 重置输出变量存储
+
+                % 添加所有字段作为输出变量
+                allFields = fieldnames(prepData);
+                for i = 1:length(allFields)
+                    fieldName = allFields{i};
+                    % 排除一些内部字段
+                    if ~strcmp(fieldName, 'complex_matrix') && ...
+                       ~strcmp(fieldName, 'preprocessing_info') && ...
+                       ~strcmp(fieldName, 'preprocessing_time') && ...
+                       ~strcmp(fieldName, 'frame_index') && ...
+                       ~strcmp(fieldName, 'frame_info')
+                        outputVars.(fieldName) = prepData.(fieldName);
+                    end
+                end
+
+                % 如果有additional_outputs，展开其内容
+                if isfield(prepData, 'additional_outputs')
+                    addOutputs = prepData.additional_outputs;
+                    addFields = fieldnames(addOutputs);
+                    for i = 1:length(addFields)
+                        fieldName = addFields{i};
+                        outputVars.(fieldName) = addOutputs.(fieldName);
+                    end
+                    % 移除additional_outputs本身
+                    if isfield(outputVars, 'additional_outputs')
+                        outputVars = rmfield(outputVars, 'additional_outputs');
+                    end
+                end
+
+                % 将输出变量添加到参数表格
+                outputFields = fieldnames(outputVars);
+                for i = 1:length(outputFields)
+                    fieldName = outputFields{i};
+                    fieldValue = outputVars.(fieldName);
+
+                    % 存储实际数据到 currentOutputVars
+                    currentOutputVars.(fieldName) = fieldValue;
+
+                    % 确定数据类型
+                    if isstruct(fieldValue)
+                        dataType = 'struct';
+                        valueStr = sprintf('<struct: %d fields>', length(fieldnames(fieldValue)));
+                        expandIcon = '+';  % struct类型显示+号
+                    elseif isnumeric(fieldValue)
+                        if isscalar(fieldValue)
+                            dataType = class(fieldValue);
+                            valueStr = num2str(fieldValue);
+                        else
+                            dataType = sprintf('%s [%s]', class(fieldValue), mat2str(size(fieldValue)));
+                            valueStr = sprintf('[%s]', mat2str(size(fieldValue)));
+                        end
+                        expandIcon = '';
+                    elseif ischar(fieldValue) || isstring(fieldValue)
+                        dataType = 'string';
+                        valueStr = char(fieldValue);
+                        expandIcon = '';
+                    elseif islogical(fieldValue)
+                        dataType = 'logical';
+                        valueStr = char(string(fieldValue));
+                        expandIcon = '';
+                    else
+                        dataType = class(fieldValue);
+                        valueStr = sprintf('<%s>', class(fieldValue));
+                        expandIcon = '';
+                    end
+
+                    % 添加到表格，操作列留空（输出变量不可删除）
+                    newRow = {expandIcon, fieldName, valueStr, dataType, ''};
+                    paramTable.Data = [paramTable.Data; newRow];
+                end
+            end
+
             function showFrameSelectionHelp()
                 % 显示帧范围选择帮助
                 helpMsg = ['帧范围格式说明：', newline, newline, ...
@@ -3738,7 +3865,7 @@ classdef MatViewerTool < matlab.apps.AppBase
                     fprintf('hasFrameInfo = %d\n', hasFrameInfo);
 
                     if ~isempty(paramMatches)
-                        paramTable.Data = cell(0, 4);
+                        paramTable.Data = cell(0, 5);
                         fromFrameInfoCount = 0;
                         fromDefaultValueCount = 0;
 
@@ -3827,7 +3954,14 @@ classdef MatViewerTool < matlab.apps.AppBase
 
                             fprintf('最终参数值: ''%s''\n', paramValue);
 
-                            newRow = {paramName, paramValue, paramType, '删除'};
+                            % 根据参数类型确定是否显示展开图标
+                            if strcmpi(paramType, 'struct')
+                                expandIcon = '+';
+                            else
+                                expandIcon = '';
+                            end
+
+                            newRow = {expandIcon, paramName, paramValue, paramType, '删除'};
                             paramTable.Data = [paramTable.Data; newRow];
                         end
 
@@ -3920,18 +4054,18 @@ classdef MatViewerTool < matlab.apps.AppBase
                             end
                         end
                         
-                        paramTable.Data = cell(0, 4);
+                        paramTable.Data = cell(0, 5);
                         fromFrameInfoCount = 0;
-                        
+
                         for i = 1:size(defaultParams, 1)
                             paramName = defaultParams{i, 1};
                             paramType = defaultParams{i, 3};
                             paramValue = '';
-                            
+
                             % 优先从帧信息获取
                             if hasFrameInfo && isfield(frameInfoData, paramName)
                                 fieldValue = frameInfoData.(paramName);
-                                
+
                                 if isstruct(fieldValue)
                                     try
                                         paramValue = jsonencode(fieldValue);
@@ -3952,8 +4086,15 @@ classdef MatViewerTool < matlab.apps.AppBase
                                 % 使用默认值
                                 paramValue = defaultParams{i, 2};
                             end
-                            
-                            newRow = {paramName, paramValue, paramType, '删除'};
+
+                            % 根据参数类型确定是否显示展开图标
+                            if strcmpi(paramType, 'struct')
+                                expandIcon = '+';
+                            else
+                                expandIcon = '';
+                            end
+
+                            newRow = {expandIcon, paramName, paramValue, paramType, '删除'};
                             paramTable.Data = [paramTable.Data; newRow];
                         end
                         
@@ -3970,7 +4111,7 @@ classdef MatViewerTool < matlab.apps.AppBase
             end
             
             function addParameter(~, ~)
-                newRow = {'param_name', '0', 'double', '删除'};
+                newRow = {'', 'param_name', '0', 'double', '删除'};
                 paramTable.Data = [paramTable.Data; newRow];
             end
             
@@ -3978,26 +4119,127 @@ classdef MatViewerTool < matlab.apps.AppBase
                 if ~isempty(event.Indices)
                     row = event.Indices(1);
                     col = event.Indices(2);
-                    if col == 4
-                        paramTable.Data(row, :) = [];  % 改用 paramTable 而不是 src
+
+                    % 点击第5列（操作列）：删除行
+                    if col == 5
+                        % 只删除手动添加的参数，不删除输出变量（操作列为空的）
+                        if ~isempty(paramTable.Data{row, 5})
+                            paramTable.Data(row, :) = [];
+                        end
+                    % 点击第1列（展开列）：展开/折叠struct
+                    elseif col == 1
+                        expandIcon = paramTable.Data{row, 1};
+                        if strcmp(expandIcon, '+')
+                            % 展开struct
+                            expandStructRow(row);
+                        elseif strcmp(expandIcon, '-')
+                            % 折叠struct
+                            collapseStructRow(row);
+                        end
+                    end
+                end
+            end
+
+            function expandStructRow(row)
+                % 展开struct类型的行
+                paramName = paramTable.Data{row, 2};
+
+                % 获取struct数据
+                if isfield(currentOutputVars, paramName)
+                    structData = currentOutputVars.(paramName);
+
+                    if isstruct(structData)
+                        % 将+改为-
+                        paramTable.Data{row, 1} = '-';
+
+                        % 获取struct的字段
+                        structFields = fieldnames(structData);
+
+                        % 在当前行后插入子行
+                        insertIdx = row + 1;
+                        for i = 1:length(structFields)
+                            fieldName = structFields{i};
+                            fieldValue = structData.(fieldName);
+
+                            % 确定数据类型和值字符串
+                            if isstruct(fieldValue)
+                                dataType = 'struct';
+                                valueStr = sprintf('<struct: %d fields>', length(fieldnames(fieldValue)));
+                                expandIcon = '+';
+                                % 存储嵌套struct的数据
+                                nestedFieldName = sprintf('%s.%s', paramName, fieldName);
+                                currentOutputVars.(nestedFieldName) = fieldValue;
+                            elseif isnumeric(fieldValue)
+                                expandIcon = '';
+                                if isscalar(fieldValue)
+                                    dataType = class(fieldValue);
+                                    valueStr = num2str(fieldValue);
+                                else
+                                    dataType = sprintf('%s [%s]', class(fieldValue), mat2str(size(fieldValue)));
+                                    valueStr = sprintf('[%s]', mat2str(size(fieldValue)));
+                                end
+                            elseif ischar(fieldValue) || isstring(fieldValue)
+                                dataType = 'string';
+                                valueStr = char(fieldValue);
+                                expandIcon = '';
+                            elseif islogical(fieldValue)
+                                dataType = 'logical';
+                                valueStr = char(string(fieldValue));
+                                expandIcon = '';
+                            else
+                                dataType = class(fieldValue);
+                                valueStr = sprintf('<%s>', class(fieldValue));
+                                expandIcon = '';
+                            end
+
+                            % 创建子行，参数名称前加缩进
+                            newRow = {expandIcon, sprintf('  %s', fieldName), valueStr, dataType, ''};
+
+                            % 插入行
+                            if insertIdx <= size(paramTable.Data, 1)
+                                paramTable.Data = [paramTable.Data(1:insertIdx-1, :); newRow; paramTable.Data(insertIdx:end, :)];
+                            else
+                                paramTable.Data = [paramTable.Data; newRow];
+                            end
+
+                            insertIdx = insertIdx + 1;
+                        end
+                    end
+                end
+            end
+
+            function collapseStructRow(row)
+                % 折叠struct类型的行
+                % 将-改为+
+                paramTable.Data{row, 1} = '+';
+
+                % 删除所有子行（以两个空格开头的行）
+                i = row + 1;
+                while i <= size(paramTable.Data, 1)
+                    % 检查是否是子行（参数名称以两个或更多空格开头）
+                    paramName = paramTable.Data{i, 2};
+                    if ischar(paramName) && length(paramName) >= 2 && strcmp(paramName(1:2), '  ')
+                        paramTable.Data(i, :) = [];
+                    else
+                        break;  % 遇到非子行，停止删除
                     end
                 end
             end
 
             function checkFrameInfoField(src, event)
                 % 检查参数名是否为帧信息字段
-                if isempty(event.Indices) || event.Indices(2) ~= 1
+                if isempty(event.Indices) || event.Indices(2) ~= 2
                     return;
                 end
-                
+
                 row = event.Indices(1);
                 paramName = strtrim(event.NewData);
-                
+
                 % 检查是否为帧信息字段
                 if ~isempty(app.MatData) && app.CurrentIndex <= length(app.MatData)
                     currentData = app.MatData{app.CurrentIndex};
                     if isfield(currentData, 'frame_info') && isfield(currentData.frame_info, paramName)
-                        src.Data{row, 2} = '将使用帧信息中的参数值';
+                        src.Data{row, 3} = '将使用帧信息中的参数值';
                         uialert(dlg, sprintf('检测到参数"%s"与帧信息字段匹配！\n应用到全部数据时将使用每帧的对应字段值。', paramName), '提示', 'Icon', 'info');
                     end
                 end
@@ -4106,10 +4348,15 @@ classdef MatViewerTool < matlab.apps.AppBase
                     end
 
                     for i = 1:size(paramData, 1)
-                        paramName = strtrim(paramData{i, 1});
-                        paramValue = paramData{i, 2};
-                        paramType = paramData{i, 3};
-                        
+                        % 跳过子行（缩进的struct字段）
+                        if ischar(paramData{i, 2}) && length(paramData{i, 2}) >= 2 && strcmp(paramData{i, 2}(1:2), '  ')
+                            continue;
+                        end
+
+                        paramName = strtrim(paramData{i, 2});  % 第2列是参数名称
+                        paramValue = paramData{i, 3};          % 第3列是参数值
+                        paramType = paramData{i, 4};           % 第4列是数据类型
+
                         if isempty(paramName) || strcmp(paramName, 'param_name')
                             continue;
                         end
@@ -4153,8 +4400,13 @@ classdef MatViewerTool < matlab.apps.AppBase
 
                 % 保存参数类型信息
                 for i = 1:size(paramData, 1)
-                    paramName = strtrim(paramData{i, 1});
-                    paramType = paramData{i, 3};
+                    % 跳过子行（缩进的struct字段）
+                    if ischar(paramData{i, 2}) && length(paramData{i, 2}) >= 2 && strcmp(paramData{i, 2}(1:2), '  ')
+                        continue;
+                    end
+
+                    paramName = strtrim(paramData{i, 2});  % 第2列是参数名称
+                    paramType = paramData{i, 4};           % 第4列是数据类型
                     if ~isempty(paramName) && ~strcmp(paramName, 'param_name')
                         prepConfig.paramTypes.(paramName) = paramType;
                     end
